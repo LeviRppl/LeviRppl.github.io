@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Zen Garden Soccer — Ball Tracker & Scoreboard</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161c26; --panel2:#1d2533; --line:#2b3648;
+    --text:#e8edf5; --dim:#8b98ac; --accent:#4ade80; --accent2:#38bdf8;
+    --p1:#f97316; --p2:#38bdf8; --danger:#f87171;
+  }
+  *{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    display:flex; flex-direction:column; overflow:hidden; height:100dvh;
+  }
+
+  /* ---------- Scoreboard ---------- */
+  #scoreboard{
+    display:flex; align-items:stretch; justify-content:center; gap:10px;
+    padding:10px 12px 8px; background:linear-gradient(180deg,#131a24,#0d1117);
+    border-bottom:1px solid var(--line); flex:0 0 auto;
+  }
+  .team{flex:1; max-width:220px; display:flex; flex-direction:column; align-items:center; gap:2px;}
+  .team input{
+    background:transparent; border:none; color:var(--dim); text-align:center;
+    font-size:13px; font-weight:600; width:100%; letter-spacing:.06em; text-transform:uppercase;
+    border-bottom:1px dashed transparent;
+  }
+  .team input:focus{outline:none; color:var(--text); border-bottom-color:var(--line);}
+  .score{font-size:44px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums;}
+  #t1 .score{color:var(--p1);} #t2 .score{color:var(--p2);}
+  #mid{display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; min-width:64px;}
+  #matchTime{font-size:12px; color:var(--dim); font-variant-numeric:tabular-nums;}
+  #resetBtn{
+    font-size:11px; color:var(--dim); background:var(--panel); border:1px solid var(--line);
+    border-radius:8px; padding:4px 10px; cursor:pointer;
+  }
+  #resetBtn:active{transform:scale(.96);}
+
+  /* ---------- Stage ---------- */
+  #stage{position:relative; flex:1 1 auto; min-height:0; background:#000; overflow:hidden;}
+  #video{position:absolute; inset:0; width:100%; height:100%; object-fit:contain;}
+  #overlay{position:absolute; inset:0; width:100%; height:100%; touch-action:none;}
+  #goalFlash{
+    position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    flex-direction:column; gap:6px; pointer-events:none; z-index:5;
+    background:radial-gradient(ellipse at center, rgba(74,222,128,.18), rgba(0,0,0,.55));
+  }
+  #goalFlash.show{display:flex; animation:flashIn .35s ease-out;}
+  #goalWord{
+    font-size:min(18vw,110px); font-weight:900; letter-spacing:.05em; color:#fff;
+    text-shadow:0 0 30px rgba(74,222,128,.9),0 0 90px rgba(74,222,128,.6);
+    animation:pulse .5s ease-in-out infinite alternate;
+  }
+  #goalWho{font-size:min(5vw,26px); font-weight:700; color:var(--accent);}
+  @keyframes flashIn{from{opacity:0; transform:scale(1.2);} to{opacity:1; transform:scale(1);}}
+  @keyframes pulse{from{transform:scale(1);} to{transform:scale(1.06);}}
+  #banner{
+    position:absolute; top:8px; left:50%; transform:translateX(-50%);
+    background:rgba(13,17,23,.82); border:1px solid var(--line); color:var(--text);
+    padding:6px 14px; border-radius:99px; font-size:12.5px; max-width:92%;
+    text-align:center; z-index:4; backdrop-filter:blur(4px); pointer-events:none;
+    transition:opacity .3s;
+  }
+  #startCard{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    z-index:6; background:rgba(13,17,23,.85);
+  }
+  #startCard .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    padding:26px 28px; text-align:center; max-width:340px;
+  }
+  #startCard h1{font-size:20px; margin-bottom:8px;}
+  #startCard p{font-size:13px; color:var(--dim); margin-bottom:18px; line-height:1.5;}
+  #startCam{
+    background:var(--accent); color:#06280f; font-weight:800; font-size:16px;
+    border:none; border-radius:12px; padding:12px 26px; cursor:pointer;
+  }
+
+  /* ---------- Toolbar ---------- */
+  #toolbar{
+    flex:0 0 auto; display:flex; gap:6px; padding:8px 10px; overflow-x:auto;
+    background:var(--panel); border-top:1px solid var(--line); align-items:center;
+  }
+  .tbtn{
+    flex:0 0 auto; background:var(--panel2); color:var(--text); border:1px solid var(--line);
+    border-radius:10px; padding:9px 13px; font-size:13px; font-weight:600; cursor:pointer;
+    white-space:nowrap; display:flex; align-items:center; gap:6px;
+  }
+  .tbtn.active{border-color:var(--accent); color:var(--accent); background:rgba(74,222,128,.08);}
+  .tbtn.rec{border-color:var(--accent); background:var(--accent); color:#06280f;}
+  .tbtn:active{transform:scale(.96);}
+  .dot{width:8px; height:8px; border-radius:50%; background:currentColor; display:inline-block;}
+
+  /* ---------- Settings panel ---------- */
+  #settings{
+    position:absolute; right:8px; bottom:8px; z-index:7; width:min(300px,90vw);
+    background:rgba(22,28,38,.96); border:1px solid var(--line); border-radius:14px;
+    padding:14px; display:none; max-height:70%; overflow-y:auto; backdrop-filter:blur(6px);
+  }
+  #settings.open{display:block;}
+  #settings h3{font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin:10px 0 6px;}
+  #settings h3:first-child{margin-top:0;}
+  .row{display:flex; align-items:center; justify-content:space-between; gap:10px; margin:7px 0; font-size:13px;}
+  .row label{color:var(--text);}
+  .row input[type=range]{flex:1; max-width:140px; accent-color:var(--accent);}
+  .row select{
+    background:var(--panel2); color:var(--text); border:1px solid var(--line);
+    border-radius:8px; padding:5px 8px; font-size:12px; max-width:160px;
+  }
+  .row .val{color:var(--dim); font-size:11px; min-width:26px; text-align:right;}
+  .switch{position:relative; width:40px; height:22px; flex:0 0 auto;}
+  .switch input{opacity:0; width:0; height:0;}
+  .slider{
+    position:absolute; inset:0; background:var(--panel2); border:1px solid var(--line);
+    border-radius:99px; cursor:pointer; transition:.2s;
+  }
+  .slider:before{
+    content:""; position:absolute; width:16px; height:16px; left:2px; top:2px;
+    background:var(--dim); border-radius:50%; transition:.2s;
+  }
+  .switch input:checked + .slider{background:rgba(74,222,128,.25); border-color:var(--accent);}
+  .switch input:checked + .slider:before{transform:translateX(18px); background:var(--accent);}
+  #ballSwatch{width:20px; height:20px; border-radius:50%; border:2px solid var(--line); background:#777;}
+  .hint{font-size:11.5px; color:var(--dim); line-height:1.45; margin:6px 0;}
+
+  /* ---------- New match modal ---------- */
+  .modalWrap{
+    position:absolute; inset:0; z-index:8; display:none;
+    align-items:center; justify-content:center; background:rgba(13,17,23,.85);
+  }
+  .modalWrap.open{display:flex;}
+  .modalWrap .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    padding:22px; width:min(340px,92vw); max-height:90%; overflow-y:auto;
+  }
+  .modalWrap h1{font-size:19px; margin-bottom:14px; text-align:center;}
+  .field-lab{font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; margin:12px 0 5px;}
+  .txt{
+    width:100%; background:var(--panel2); border:1px solid var(--line); color:var(--text);
+    border-radius:10px; padding:10px 12px; font-size:15px; font-weight:600;
+  }
+  .txt:focus{outline:none; border-color:var(--accent);}
+  .chips{display:flex; flex-wrap:wrap; gap:7px;}
+  .chip{
+    background:var(--panel2); border:1px solid var(--line); color:var(--text);
+    border-radius:99px; padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer;
+  }
+  .chip.sel{border-color:var(--accent); color:var(--accent); background:rgba(74,222,128,.1);}
+  #customMin{width:74px; padding:7px 10px; border-radius:99px; text-align:center; font-size:13px;
+    background:var(--panel2); border:1px solid var(--line); color:var(--text); display:none;}
+  #customMin.show{display:inline-block;}
+  .modalBtns{display:flex; gap:8px; margin-top:18px;}
+  .bigBtn{
+    flex:1; border:none; border-radius:12px; padding:12px; font-size:15px; font-weight:800; cursor:pointer;
+  }
+  .bigBtn.go{background:var(--accent); color:#06280f;}
+  .bigBtn.ghost{background:var(--panel2); color:var(--dim); border:1px solid var(--line);}
+  #phaseLabel{font-size:10px; font-weight:800; letter-spacing:.1em; color:var(--accent);}
+  #phaseLabel.paused{color:var(--danger);}
+</style>
+</head>
+<body>
+
+<div id="scoreboard">
+  <div class="team" id="t1">
+    <input id="name1" value="PLAYER 1" maxlength="14">
+    <div class="score" id="score1">0</div>
+  </div>
+  <div id="mid">
+    <div id="phaseLabel">&nbsp;</div>
+    <div id="matchTime">--:--</div>
+    <button id="resetBtn">Restart</button>
+  </div>
+  <div class="team" id="t2">
+    <input id="name2" value="PLAYER 2" maxlength="14">
+    <div class="score" id="score2">0</div>
+  </div>
+</div>
+
+<div id="stage">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="overlay"></canvas>
+  <div id="banner">Tap “Start Camera” to begin</div>
+  <div id="goalFlash"><div id="goalWord">GOAL!</div><div id="goalWho"></div></div>
+  <div id="startCard">
+    <div class="card">
+      <h1>⚽ Zen Garden Soccer</h1>
+      <p>Point the camera at your mini field. You'll set the out-of-bounds box, mark both goals, then tap the ball to calibrate tracking.</p>
+      <button id="startCam">Start Camera</button>
+    </div>
+  </div>
+  <div id="setupModal" class="modalWrap">
+    <div class="card">
+      <h1>⚽ New Match</h1>
+      <div class="field-lab">Player 1</div>
+      <input class="txt" id="setupN1" value="Player 1" maxlength="14">
+      <div class="field-lab">Player 2</div>
+      <input class="txt" id="setupN2" value="Player 2" maxlength="14">
+      <div class="field-lab">Time per half</div>
+      <div class="chips" id="halfChips">
+        <button class="chip" data-min="0">Endless</button>
+        <button class="chip" data-min="2">2 min</button>
+        <button class="chip sel" data-min="5">5 min</button>
+        <button class="chip" data-min="10">10 min</button>
+        <button class="chip" data-min="custom">Custom…</button>
+        <input id="customMin" type="number" min="1" max="90" value="7" inputmode="numeric">
+      </div>
+      <div class="modalBtns">
+        <button class="bigBtn ghost" id="setupCancel">Cancel</button>
+        <button class="bigBtn go" id="setupStart">Let's Play</button>
+      </div>
+    </div>
+  </div>
+  <div id="settings">
+    <h3>Ball tracking</h3>
+    <div class="row"><label>Ball color</label><div id="ballSwatch"></div></div>
+    <div class="row"><label>Sensitivity</label><input type="range" id="sens" min="15" max="110" value="52"><span class="val" id="sensVal">52</span></div>
+    <div class="row"><label>Min ball size</label><input type="range" id="minPix" min="2" max="30" value="4"><span class="val" id="minPixVal">4</span></div>
+    <div class="row"><label>Show tracking debug</label><label class="switch"><input type="checkbox" id="debugChk"><span class="slider"></span></label></div>
+    <p class="hint">If tracking is jumpy, lower sensitivity. If it loses the ball, raise it. Re-tap the ball with “Calibrate Ball” any time the light changes.</p>
+    <h3>Sound</h3>
+    <div class="row"><label>Ambient crowd</label><label class="switch"><input type="checkbox" id="ambChk" checked><span class="slider"></span></label></div>
+    <div class="row"><label>Crowd volume</label><input type="range" id="vol" min="0" max="100" value="60"><span class="val" id="volVal">60</span></div>
+    <div class="row"><label>Announcer voice</label><label class="switch"><input type="checkbox" id="voiceChk" checked><span class="slider"></span></label></div>
+    <div class="row"><label>Call out-of-bounds</label><label class="switch"><input type="checkbox" id="oobVoiceChk"><span class="slider"></span></label></div>
+    <h3>Goals</h3>
+    <div class="row"><label>Goal A scores for</label>
+      <select id="goalAFor"><option value="0">Player 1</option><option value="1">Player 2</option></select></div>
+    <div class="row"><label>Goal B scores for</label>
+      <select id="goalBFor" ><option value="0">Player 1</option><option value="1" selected>Player 2</option></select></div>
+    <div class="row"><label>Goal zone depth</label><input type="range" id="depth" min="2" max="20" value="7"><span class="val" id="depthVal">7</span></div>
+    <h3>Camera</h3>
+    <div class="row"><label>Source</label><select id="camSel"></select></div>
+  </div>
+</div>
+
+<div id="toolbar">
+  <button class="tbtn" id="newGameBtn">✚ New Game</button>
+  <button class="tbtn" id="mainBtn">▶ Kickoff</button>
+  <button class="tbtn" id="modeField">▢ Field</button>
+  <button class="tbtn" id="modeGoalA">🥅 Goal A</button>
+  <button class="tbtn" id="modeGoalB">🥅 Goal B</button>
+  <button class="tbtn" id="modeCal">🎯 Ball</button>
+  <button class="tbtn" id="setBtn">⚙︎</button>
+</div>
+
+<script>
+"use strict";
+/* =========================================================
+   Zen Garden Soccer — camera ball tracker & scoreboard
+   Everything runs locally in your browser. No uploads.
+   ========================================================= */
+
+// ---------- DOM ----------
+const $ = id => document.getElementById(id);
+const video = $("video"), overlay = $("overlay"), octx = overlay.getContext("2d");
+const banner = $("banner");
+const PW = 256; let PH = 144;               // processing resolution
+const proc = document.createElement("canvas");
+const pctx = proc.getContext("2d", { willReadFrequently:true });
+
+// ---------- State ----------
+const state = {
+  running:false,            // camera on
+  playing:false,            // ball tracking + scoring active (derived from match state)
+  mode:null,                // 'field' | 'goalA' | 'goalB' | 'cal' | null
+  scores:[0,0],
+  match:{
+    mode:"timed",           // 'timed' | 'endless'
+    halfLen:300,            // seconds per half
+    phase:"idle",           // 'idle' | 'h1' | 'ht' | 'h2' | 'ft'
+    base:0,                 // elapsed seconds accumulated before last resume
+    startAt:0,              // performance.now() at last resume
+    paused:true,
+  },
+  // normalized (0..1 of the video frame) geometry
+  field:[{x:.12,y:.15},{x:.88,y:.15},{x:.88,y:.85},{x:.12,y:.85}],
+  goals:{
+    A:{a:{x:.12,y:.38},b:{x:.12,y:.62}},   // left goal mouth
+    B:{a:{x:.88,y:.38},b:{x:.88,y:.62}},   // right goal mouth
+  },
+  goalDepth:0.07,
+  goalFor:{A:0,B:1},
+  // ball
+  ballColor:null,           // {r,g,b}
+  sens:52, minPix:4, debug:false,
+  ball:{pos:null, smooth:null, lost:999, hist:[]},
+  // event state machines
+  goalState:{A:{armed:true,lastFieldSide:0,cooldownUntil:0}, B:{armed:true,lastFieldSide:0,cooldownUntil:0}},
+  oob:{inField:false, outFrames:0, called:false},
+  lastGoalAt:0,
+};
+
+// ---------- Geometry helpers (exposed for tests) ----------
+function cross(ax,ay,bx,by){ return ax*by - ay*bx; }
+function sideOfLine(a,b,p){ return Math.sign(cross(b.x-a.x, b.y-a.y, p.x-a.x, p.y-a.y)) || 0; }
+function projT(a,b,p){
+  const dx=b.x-a.x, dy=b.y-a.y, L2=dx*dx+dy*dy;
+  return L2===0 ? 0 : ((p.x-a.x)*dx + (p.y-a.y)*dy)/L2;
+}
+function pointInQuad(q,p){
+  let s = 0;
+  for(let i=0;i<4;i++){
+    const a=q[i], b=q[(i+1)%4];
+    const c = cross(b.x-a.x,b.y-a.y,p.x-a.x,p.y-a.y);
+    if(c!==0){ if(s===0) s=Math.sign(c); else if(Math.sign(c)!==s) return false; }
+  }
+  return true;
+}
+function centroid(pts){
+  let x=0,y=0; for(const p of pts){x+=p.x;y+=p.y;}
+  return {x:x/pts.length,y:y/pts.length};
+}
+// crossing of segment p0->p1 over infinite line a->b; returns t on the goal line or null
+function segLineCross(a,b,p0,p1){
+  const s0 = cross(b.x-a.x,b.y-a.y,p0.x-a.x,p0.y-a.y);
+  const s1 = cross(b.x-a.x,b.y-a.y,p1.x-a.x,p1.y-a.y);
+  if((s0>0&&s1>0)||(s0<0&&s1<0)||(s0===0&&s1===0)) return null;
+  const f = s0/(s0-s1);
+  const ip = {x:p0.x+(p1.x-p0.x)*f, y:p0.y+(p1.y-p0.y)*f};
+  return projT(a,b,ip);
+}
+// zone quad behind the goal line (away from field center)
+function goalZone(g){
+  const fc = centroid(state.field);
+  let nx = -(g.b.y-g.a.y), ny = (g.b.x-g.a.x);
+  const len = Math.hypot(nx,ny)||1; nx/=len; ny/=len;
+  const mid = {x:(g.a.x+g.b.x)/2, y:(g.a.y+g.b.y)/2};
+  // flip normal so it points AWAY from field center (behind the goal)
+  if((fc.x-mid.x)*nx + (fc.y-mid.y)*ny > 0){ nx=-nx; ny=-ny; }
+  const d = state.goalDepth;
+  return {
+    quad:[g.a, g.b, {x:g.b.x+nx*d, y:g.b.y+ny*d}, {x:g.a.x+nx*d, y:g.a.y+ny*d}],
+    fieldSide: sideOfLine(g.a,g.b,fc)
+  };
+}
+window.__test = { sideOfLine, pointInQuad, segLineCross, projT, goalZone, state,
+  gameStep: (...a)=>gameStep(...a),
+  match: { kickoff:()=>kickoff(), pauseResume:()=>pauseResume(), restart:()=>restartMatch(),
+           startSecondHalf:()=>startSecondHalf() } };
+
+// ---------- Canvas fit / coordinate mapping ----------
+let fit = {scale:1, ox:0, oy:0, vw:1280, vh:720};
+function refit(){
+  const r = overlay.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  overlay.width = r.width*dpr; overlay.height = r.height*dpr;
+  overlay.style.width = r.width+"px"; overlay.style.height = r.height+"px";
+  octx.setTransform(dpr,0,0,dpr,0,0);
+  const vw = video.videoWidth||1280, vh = video.videoHeight||720;
+  fit.vw=vw; fit.vh=vh;
+  fit.scale = Math.min(r.width/vw, r.height/vh);
+  fit.ox = (r.width - vw*fit.scale)/2;
+  fit.oy = (r.height - vh*fit.scale)/2;
+}
+const n2c = p => ({x:fit.ox + p.x*fit.vw*fit.scale, y:fit.oy + p.y*fit.vh*fit.scale});
+const c2n = (x,y) => ({x:(x-fit.ox)/(fit.vw*fit.scale), y:(y-fit.oy)/(fit.vh*fit.scale)});
+window.addEventListener("resize", refit);
+
+// ---------- Camera ----------
+async function startCamera(deviceId){
+  const constraints = { audio:false, video: deviceId
+    ? {deviceId:{exact:deviceId}, width:{ideal:1280}, height:{ideal:720}}
+    : {facingMode:"environment", width:{ideal:1280}, height:{ideal:720}} };
+  if(video.srcObject){ video.srcObject.getTracks().forEach(t=>t.stop()); }
+  const stream = await navigator.mediaDevices.getUserMedia(constraints);
+  video.srcObject = stream;
+  await video.play();
+  PH = Math.round(PW * video.videoHeight/video.videoWidth) || 144;
+  proc.width = PW; proc.height = PH;
+  refit();
+  state.running = true;
+  populateCams();
+}
+async function populateCams(){
+  try{
+    const devs = await navigator.mediaDevices.enumerateDevices();
+    const cams = devs.filter(d=>d.kind==="videoinput");
+    const sel = $("camSel"); sel.innerHTML="";
+    cams.forEach((c,i)=>{
+      const o=document.createElement("option");
+      o.value=c.deviceId; o.textContent=c.label||("Camera "+(i+1));
+      sel.appendChild(o);
+    });
+    const cur = video.srcObject && video.srcObject.getVideoTracks()[0].getSettings().deviceId;
+    if(cur) sel.value = cur;
+  }catch(e){}
+}
+$("camSel").addEventListener("change", e=> startCamera(e.target.value).catch(err=>say("Camera switch failed: "+err.message)));
+
+// ---------- Audio ----------
+let AC=null, ambGain=null, master=null, ambTimer=null;
+function ensureAudio(){
+  if(AC) return;
+  const Ctx = window.AudioContext||window.webkitAudioContext;
+  if(!Ctx) return;
+  AC = new Ctx();
+  master = AC.createGain(); master.gain.value = getVol(); master.connect(AC.destination);
+  startAmbient();
+}
+function getVol(){ return (+$("vol").value)/100; }
+function noiseBuffer(sec){
+  const b = AC.createBuffer(1, AC.sampleRate*sec, AC.sampleRate);
+  const d = b.getChannelData(0);
+  let last=0;
+  for(let i=0;i<d.length;i++){ // pinkish noise
+    const w = Math.random()*2-1;
+    last = 0.98*last + 0.02*w;
+    d[i] = last*3.2;
+  }
+  return b;
+}
+function startAmbient(){
+  if(!AC) return;
+  const src = AC.createBufferSource();
+  src.buffer = noiseBuffer(3); src.loop = true;
+  const bp = AC.createBiquadFilter(); bp.type="bandpass"; bp.frequency.value=420; bp.Q.value=0.6;
+  ambGain = AC.createGain();
+  ambGain.gain.value = $("ambChk").checked ? 0.16 : 0;
+  src.connect(bp).connect(ambGain).connect(master);
+  src.start();
+  // slow murmur swells
+  ambTimer = setInterval(()=>{
+    if(!AC||!ambGain) return;
+    if(!$("ambChk").checked){ ambGain.gain.setTargetAtTime(0, AC.currentTime, .4); return; }
+    const target = 0.10 + Math.random()*0.14;
+    ambGain.gain.setTargetAtTime(target, AC.currentTime, 1.6);
+    bp.frequency.setTargetAtTime(340+Math.random()*260, AC.currentTime, 2);
+  }, 2500);
+}
+function crowdRoar(big){
+  if(!AC) return;
+  const dur = big?4.5:3.2;
+  const src = AC.createBufferSource(); src.buffer = noiseBuffer(dur);
+  const bp = AC.createBiquadFilter(); bp.type="bandpass"; bp.Q.value=0.5;
+  bp.frequency.setValueAtTime(350, AC.currentTime);
+  bp.frequency.exponentialRampToValueAtTime(900, AC.currentTime+0.5);
+  bp.frequency.exponentialRampToValueAtTime(450, AC.currentTime+dur);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0.001, AC.currentTime);
+  g.gain.exponentialRampToValueAtTime(big?1.0:0.7, AC.currentTime+0.35);
+  g.gain.exponentialRampToValueAtTime(0.001, AC.currentTime+dur);
+  src.connect(bp).connect(g).connect(master);
+  src.start();
+  // scattered celebration whistles
+  const n = big?6:3;
+  for(let i=0;i<n;i++){
+    const t = AC.currentTime + 0.3 + Math.random()*1.5;
+    const o = AC.createOscillator(); o.type="sine";
+    const f = 1400+Math.random()*900;
+    o.frequency.setValueAtTime(f, t);
+    o.frequency.linearRampToValueAtTime(f*1.25, t+0.18);
+    const og = AC.createGain();
+    og.gain.setValueAtTime(0.0001, t);
+    og.gain.exponentialRampToValueAtTime(0.05, t+0.05);
+    og.gain.exponentialRampToValueAtTime(0.0001, t+0.3);
+    o.connect(og).connect(master); o.start(t); o.stop(t+0.35);
+  }
+  // crowd "surge" thump
+  const th = AC.createOscillator(); th.type="sine";
+  th.frequency.setValueAtTime(90, AC.currentTime);
+  th.frequency.exponentialRampToValueAtTime(50, AC.currentTime+0.6);
+  const tg = AC.createGain();
+  tg.gain.setValueAtTime(0.25, AC.currentTime);
+  tg.gain.exponentialRampToValueAtTime(0.001, AC.currentTime+0.7);
+  th.connect(tg).connect(master); th.start(); th.stop(AC.currentTime+0.8);
+}
+function refWhistle(){
+  if(!AC) return;
+  const mk = (t0)=>{
+    const o = AC.createOscillator(); o.type="square"; o.frequency.value=2350;
+    const trem = AC.createOscillator(); trem.type="sine"; trem.frequency.value=38;
+    const tg = AC.createGain(); tg.gain.value=0.5;
+    const g = AC.createGain(); g.gain.setValueAtTime(0.0001,t0);
+    g.gain.exponentialRampToValueAtTime(0.12,t0+0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001,t0+0.28);
+    trem.connect(tg.gain);
+    o.connect(tg).connect(g).connect(master);
+    o.start(t0); o.stop(t0+0.3); trem.start(t0); trem.stop(t0+0.3);
+  };
+  mk(AC.currentTime); mk(AC.currentTime+0.34);
+}
+function announce(text){
+  if(!$("voiceChk").checked || !("speechSynthesis" in window)) return;
+  try{
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.02; u.pitch = 1.05; u.volume = 1;
+    const v = speechSynthesis.getVoices().find(v=>/en[-_]/i.test(v.lang));
+    if(v) u.voice = v;
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+$("vol").addEventListener("input", e=>{ $("volVal").textContent=e.target.value; if(master) master.gain.value=getVol(); });
+
+// ---------- Ball tracking ----------
+function sampleBallColor(nx,ny){
+  pctx.drawImage(video,0,0,PW,PH);
+  const cx = Math.round(nx*PW), cy = Math.round(ny*PH);
+  const R=2;
+  const img = pctx.getImageData(Math.max(0,cx-R), Math.max(0,cy-R), R*2+1, R*2+1).data;
+  let r=0,g=0,b=0,n=0;
+  for(let i=0;i<img.length;i+=4){ r+=img[i]; g+=img[i+1]; b+=img[i+2]; n++; }
+  state.ballColor = {r:r/n, g:g/n, b:b/n};
+  const c = state.ballColor;
+  $("ballSwatch").style.background = `rgb(${c.r|0},${c.g|0},${c.b|0})`;
+  state.ball.lost = 999; state.ball.pos = {x:nx,y:ny}; state.ball.hist=[];
+}
+function trackBall(now){
+  if(!state.ballColor) return;
+  pctx.drawImage(video,0,0,PW,PH);
+  const data = pctx.getImageData(0,0,PW,PH).data;
+  const c = state.ballColor, t2 = state.sens*state.sens;
+  const match = (i)=>{
+    const dr=data[i]-c.r, dg=data[i+1]-c.g, db=data[i+2]-c.b;
+    return dr*dr+dg*dg+db*db < t2;
+  };
+  let pts = [];
+  const b = state.ball;
+  if(b.pos && b.lost < 45){
+    // windowed search around last position (grows while lost)
+    const rad = Math.min(90, 16 + b.lost*4);
+    const cx = Math.round(b.pos.x*PW), cy = Math.round(b.pos.y*PH);
+    const x0=Math.max(0,cx-rad), x1=Math.min(PW-1,cx+rad);
+    const y0=Math.max(0,cy-rad), y1=Math.min(PH-1,cy+rad);
+    for(let y=y0;y<=y1;y++){
+      let i=(y*PW+x0)*4;
+      for(let x=x0;x<=x1;x++,i+=4){ if(match(i)) pts.push(x,y); }
+    }
+  }
+  if(pts.length/2 < state.minPix){
+    // full-frame coarse search: find densest 24px cell, then use its 3x3 neighborhood
+    const CS=24, GW=Math.ceil(PW/CS), GH=Math.ceil(PH/CS);
+    const counts = new Uint16Array(GW*GH);
+    const all = [];
+    for(let y=0;y<PH;y+=2){
+      let i=(y*PW)*4;
+      for(let x=0;x<PW;x+=2,i+=8){
+        if(match(i)){ all.push(x,y); counts[((y/CS)|0)*GW + ((x/CS)|0)]++; }
+      }
+    }
+    let best=-1,bi=-1;
+    for(let k=0;k<counts.length;k++) if(counts[k]>best){best=counts[k];bi=k;}
+    pts = [];
+    if(best>0){
+      const gx=bi%GW, gy=(bi/GW)|0;
+      for(let k=0;k<all.length;k+=2){
+        const x=all[k],y=all[k+1];
+        if(Math.abs(((x/CS)|0)-gx)<=1 && Math.abs(((y/CS)|0)-gy)<=1) pts.push(x,y);
+      }
+    }
+  }
+  const n = pts.length/2;
+  if(n >= state.minPix){
+    let sx=0,sy=0;
+    for(let k=0;k<pts.length;k+=2){ sx+=pts[k]; sy+=pts[k+1]; }
+    const p = {x:(sx/n)/PW, y:(sy/n)/PH};
+    b.pos = p;
+    b.smooth = b.smooth ? {x:b.smooth.x*0.45+p.x*0.55, y:b.smooth.y*0.45+p.y*0.55} : p;
+    b.lost = 0;
+    b.hist.push({x:b.smooth.x, y:b.smooth.y, t:now});
+    if(b.hist.length>30) b.hist.shift();
+  }else{
+    b.lost++;
+  }
+  if(state.debug){ state._dbgPts = pts; } else state._dbgPts = null;
+}
+
+// ---------- Game logic ----------
+function names(){ return [$("name1").value.trim()||"Player 1", $("name2").value.trim()||"Player 2"]; }
+function scoreText(){
+  const [n1,n2] = names(), [s1,s2] = state.scores;
+  if(s1===s2) return `It's all tied up at ${s1}.`;
+  return s1>s2 ? `${n1} leads ${s1} to ${s2}.` : `${n2} leads ${s2} to ${s1}.`;
+}
+function onGoal(which){
+  const now = performance.now();
+  state.lastGoalAt = now;
+  const player = state.goalFor[which];
+  state.scores[player]++;
+  updateScore();
+  const scorer = names()[player];
+  // visuals
+  $("goalWord").textContent = "GOAL!";
+  $("goalWho").textContent = scorer + " scores!";
+  const gf = $("goalFlash");
+  gf.classList.remove("show"); void gf.offsetWidth; gf.classList.add("show");
+  setTimeout(()=>gf.classList.remove("show"), 3600);
+  // audio
+  crowdRoar(true);
+  setTimeout(()=> announce(`Goal! ${scorer} scores. ${scoreText()}`), 1300);
+  // disarm both goals until ball returns to the field
+  for(const k of ["A","B"]){
+    state.goalState[k].armed = false;
+    state.goalState[k].cooldownUntil = now + 3000;
+  }
+  state.oob.called = true; // don't also call OOB on the ball sitting in the net
+  say(scorer+" scores! Return the ball to the field.");
+}
+function onOOB(){
+  refWhistle();
+  if($("oobVoiceChk").checked) setTimeout(()=>announce("Out of bounds."), 350);
+  say("Out of bounds!");
+}
+function gameStep(now){
+  const b = state.ball;
+  if(b.lost>6 || !b.smooth) return;
+  const p = b.smooth;
+  const inField = pointInQuad(state.field, p);
+
+  // --- goals ---
+  for(const k of ["A","B"]){
+    const g = state.goals[k], gs = state.goalState[k];
+    const {quad, fieldSide} = goalZone(g);
+    const side = sideOfLine(g.a, g.b, p);
+    // re-arm: ball clearly back on field side, in the field, past cooldown
+    if(!gs.armed && now>gs.cooldownUntil && inField && side===fieldSide){
+      gs.armed = true;
+    }
+    if(gs.armed){
+      if(side===fieldSide){ gs.lastFieldSide = now; gs.prevP = {x:p.x,y:p.y}; }
+      else if(gs.prevP && now - gs.lastFieldSide < 450){
+        // ball moved from field side to goal side very recently — did it cross the mouth?
+        const t = segLineCross(g.a, g.b, gs.prevP, p);
+        const inZone = pointInQuad(quad, p);
+        if(t!==null && t>-0.12 && t<1.12 && inZone){
+          gs.armed=false; gs.prevP=null;
+          onGoal(k);
+          return;
+        }
+      }
+    }
+  }
+
+  // --- out of bounds ---
+  const inAnyZone = pointInQuad(goalZone(state.goals.A).quad, p) || pointInQuad(goalZone(state.goals.B).quad, p);
+  if(inField){
+    state.oob.inField = true; state.oob.outFrames = 0; state.oob.called = false;
+  }else if(state.oob.inField && !inAnyZone && now - state.lastGoalAt > 3000){
+    state.oob.outFrames++;
+    if(state.oob.outFrames > 6 && !state.oob.called){
+      state.oob.called = true; state.oob.inField = false;
+      onOOB();
+    }
+  }
+}
+function updateScore(){
+  $("score1").textContent = state.scores[0];
+  $("score2").textContent = state.scores[1];
+}
+
+// ---------- Match state machine ----------
+function fmtClock(s){ s=Math.max(0,Math.round(s)); return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0"); }
+function clockElapsed(now){ const m=state.match; return m.base + (m.paused?0:(now-m.startAt)/1000); }
+function syncPlaying(){
+  const m=state.match;
+  state.playing = (m.phase==="h1"||m.phase==="h2") && !m.paused;
+  updateMainBtn();
+}
+function updateMainBtn(){
+  const m=state.match, btn=$("mainBtn");
+  btn.classList.remove("rec");
+  if(m.phase==="idle"){ btn.textContent="▶ Kickoff"; }
+  else if(m.phase==="ht"){ btn.textContent="▶ Start 2nd Half"; }
+  else if(m.phase==="ft"){ btn.textContent="⟳ Rematch"; }
+  else if(m.paused){ btn.textContent="▶ Resume"; }
+  else { btn.textContent="❚❚ Pause"; btn.classList.add("rec"); }
+}
+function startClock(now){ const m=state.match; m.base=0; m.startAt=now; m.paused=false; }
+function kickoff(){
+  if(!state.ballColor){ say("Calibrate the ball first (🎯), then kick off."); setMode("cal"); return; }
+  ensureAudio();
+  const m=state.match;
+  m.phase="h1"; startClock(performance.now());
+  syncPlaying(); setMode(null);
+  announce("Kick off!"); say("Match live — 1st half!");
+}
+function pauseResume(){
+  const m=state.match, now=performance.now();
+  if(m.paused){ m.startAt=now; m.paused=false; say("Back underway!"); }
+  else { m.base=clockElapsed(now); m.paused=true; say("Paused."); }
+  syncPlaying();
+}
+function halftime(){
+  const m=state.match;
+  m.phase="ht"; m.paused=true; m.base=0;
+  syncPlaying();
+  refWhistle();
+  setTimeout(()=>announce("Halftime! "+scoreText()), 700);
+  say("Halftime — press ▶ when you're ready for the 2nd half.");
+}
+function startSecondHalf(){
+  ensureAudio();
+  const m=state.match;
+  m.phase="h2"; startClock(performance.now());
+  syncPlaying();
+  announce("Second half — underway!"); say("2nd half live!");
+}
+function fullTime(){
+  const m=state.match;
+  m.phase="ft"; m.paused=true; m.base=0;
+  syncPlaying();
+  refWhistle(); setTimeout(refWhistle, 500);
+  crowdRoar(true);
+  const [n1,n2]=names(), [s1,s2]=state.scores;
+  const call = s1===s2 ? `Full time! It ends in a draw, ${s1} all.`
+    : `Full time! ${s1>s2?n1:n2} wins it, ${Math.max(s1,s2)} to ${Math.min(s1,s2)}!`;
+  setTimeout(()=>announce(call), 1400);
+  $("goalWord").textContent="FULL TIME";
+  $("goalWho").textContent = s1===s2 ? `Draw — ${s1} : ${s2}` : `${s1>s2?n1:n2} wins ${Math.max(s1,s2)}–${Math.min(s1,s2)}!`;
+  const gf=$("goalFlash");
+  gf.classList.remove("show"); void gf.offsetWidth; gf.classList.add("show");
+  setTimeout(()=>gf.classList.remove("show"), 5200);
+  say("Full time! ✚ New Game or ⟳ Rematch to play again.");
+}
+function restartMatch(){
+  const m=state.match;
+  state.scores=[0,0]; updateScore();
+  m.phase="idle"; m.paused=true; m.base=0;
+  state.oob={inField:false,outFrames:0,called:false};
+  for(const k of ["A","B"]){ state.goalState[k]={armed:true,lastFieldSide:0,cooldownUntil:0}; }
+  syncPlaying();
+  say("Match reset — press ▶ Kickoff when the ball's in place.");
+}
+$("mainBtn").addEventListener("click", ()=>{
+  const m=state.match;
+  if(!state.running){ say("Start the camera first."); return; }
+  if(m.phase==="idle") kickoff();
+  else if(m.phase==="ht") startSecondHalf();
+  else if(m.phase==="ft") restartMatch();
+  else pauseResume();
+});
+$("resetBtn").addEventListener("click", ()=>{ restartMatch(); announce("New match. Nil nil."); });
+
+// ---------- New game modal ----------
+let chipMin = 5;
+$("newGameBtn").addEventListener("click", ()=>{
+  $("setupN1").value = $("name1").value;
+  $("setupN2").value = $("name2").value;
+  $("setupModal").classList.add("open");
+});
+$("halfChips").addEventListener("click", e=>{
+  const c = e.target.closest(".chip"); if(!c) return;
+  document.querySelectorAll("#halfChips .chip").forEach(x=>x.classList.remove("sel"));
+  c.classList.add("sel");
+  const v = c.dataset.min;
+  $("customMin").classList.toggle("show", v==="custom");
+  chipMin = v==="custom" ? "custom" : +v;
+});
+$("setupCancel").addEventListener("click", ()=> $("setupModal").classList.remove("open"));
+$("setupStart").addEventListener("click", ()=>{
+  $("name1").value = $("setupN1").value.trim()||"Player 1";
+  $("name2").value = $("setupN2").value.trim()||"Player 2";
+  const m = state.match;
+  const mins = chipMin==="custom" ? Math.max(1,Math.min(90,+$("customMin").value||7)) : chipMin;
+  if(mins===0){ m.mode="endless"; } else { m.mode="timed"; m.halfLen=mins*60; }
+  $("setupModal").classList.remove("open");
+  restartMatch();
+  if(!state.ballColor){ say("Almost there — tap 🎯 and tap the ball to calibrate, then ▶ Kickoff."); }
+  else say((m.mode==="endless"?"Endless match":"2 halves of "+mins+" min")+" — place the ball and press ▶ Kickoff!");
+});
+
+// ---------- Drawing ----------
+function drawShapes(){
+  const w = overlay.clientWidth, h = overlay.clientHeight;
+  octx.clearRect(0,0,w,h);
+  if(!state.running) return;
+
+  // field
+  octx.lineWidth = 2.5;
+  octx.strokeStyle = "rgba(255,255,255,.85)";
+  octx.setLineDash(state.mode==="field"?[8,6]:[]);
+  octx.beginPath();
+  state.field.forEach((p,i)=>{ const c=n2c(p); i?octx.lineTo(c.x,c.y):octx.moveTo(c.x,c.y); });
+  octx.closePath(); octx.stroke();
+  octx.setLineDash([]);
+
+  // goals
+  for(const k of ["A","B"]){
+    const g = state.goals[k];
+    const {quad} = goalZone(g);
+    const col = state.goalFor[k]===0 ? "249,115,22" : "56,189,248";
+    octx.fillStyle = `rgba(${col},.18)`;
+    octx.beginPath();
+    quad.forEach((p,i)=>{ const c=n2c(p); i?octx.lineTo(c.x,c.y):octx.moveTo(c.x,c.y); });
+    octx.closePath(); octx.fill();
+    octx.strokeStyle = `rgba(${col},.9)`;
+    octx.lineWidth = state.mode==="goal"+k ? 4 : 2.5;
+    const ca=n2c(g.a), cb=n2c(g.b);
+    octx.beginPath(); octx.moveTo(ca.x,ca.y); octx.lineTo(cb.x,cb.y); octx.stroke();
+    // label
+    const m = n2c({x:(g.a.x+g.b.x)/2,y:(g.a.y+g.b.y)/2});
+    octx.fillStyle = `rgba(${col},1)`;
+    octx.font = "700 12px sans-serif"; octx.textAlign="center";
+    octx.fillText(k, m.x, m.y-8);
+  }
+
+  // handles in edit modes
+  const handles = editHandles();
+  for(const hd of handles){
+    const c = n2c(hd.p);
+    octx.beginPath(); octx.arc(c.x,c.y,11,0,7);
+    octx.fillStyle="rgba(74,222,128,.25)"; octx.fill();
+    octx.beginPath(); octx.arc(c.x,c.y,5,0,7);
+    octx.fillStyle="#4ade80"; octx.fill();
+  }
+
+  // debug mask
+  if(state._dbgPts){
+    octx.fillStyle="rgba(255,0,255,.6)";
+    for(let k=0;k<state._dbgPts.length;k+=2){
+      const c = n2c({x:state._dbgPts[k]/PW, y:state._dbgPts[k+1]/PH});
+      octx.fillRect(c.x-1,c.y-1,2.5,2.5);
+    }
+  }
+
+  // ball marker
+  const b = state.ball;
+  if(b.smooth && b.lost<20){
+    const c = n2c(b.smooth);
+    octx.beginPath(); octx.arc(c.x,c.y, 14,0,7);
+    octx.strokeStyle = b.lost===0 ? "#facc15":"rgba(250,204,21,.4)";
+    octx.lineWidth=3; octx.stroke();
+    // trail
+    octx.beginPath();
+    b.hist.forEach((p,i)=>{ const q=n2c(p); i?octx.lineTo(q.x,q.y):octx.moveTo(q.x,q.y); });
+    octx.strokeStyle="rgba(250,204,21,.35)"; octx.lineWidth=2; octx.stroke();
+  }
+}
+function editHandles(){
+  if(state.mode==="field") return state.field.map((p,i)=>({p, set:(q)=>state.field[i]=q}));
+  if(state.mode==="goalA"||state.mode==="goalB"){
+    const g = state.goals[state.mode==="goalA"?"A":"B"];
+    return [{p:g.a,set:q=>g.a=q},{p:g.b,set:q=>g.b=q}];
+  }
+  return [];
+}
+
+// ---------- Pointer interaction ----------
+let drag = null;
+overlay.addEventListener("pointerdown", e=>{
+  if(!state.running) return;
+  const rect = overlay.getBoundingClientRect();
+  const x = e.clientX-rect.left, y = e.clientY-rect.top;
+  const p = c2n(x,y);
+  if(state.mode==="cal"){
+    if(p.x<0||p.x>1||p.y<0||p.y>1) return;
+    sampleBallColor(p.x,p.y);
+    say("Ball calibrated ✓ — tracking that color now.");
+    setMode(null);
+    return;
+  }
+  const handles = editHandles();
+  let best=null, bd=28;
+  for(const hd of handles){
+    const c = n2c(hd.p);
+    const d = Math.hypot(c.x-x, c.y-y);
+    if(d<bd){bd=d;best=hd;}
+  }
+  if(best){ drag = best; overlay.setPointerCapture(e.pointerId); }
+});
+overlay.addEventListener("pointermove", e=>{
+  if(!drag) return;
+  const rect = overlay.getBoundingClientRect();
+  const p = c2n(e.clientX-rect.left, e.clientY-rect.top);
+  drag.set({x:Math.min(1,Math.max(0,p.x)), y:Math.min(1,Math.max(0,p.y))});
+});
+overlay.addEventListener("pointerup", ()=> drag=null);
+overlay.addEventListener("pointercancel", ()=> drag=null);
+
+// ---------- Modes & toolbar ----------
+const modeBtns = {field:$("modeField"), goalA:$("modeGoalA"), goalB:$("modeGoalB"), cal:$("modeCal")};
+function setMode(m){
+  state.mode = (state.mode===m)?null:m;
+  for(const k in modeBtns) modeBtns[k].classList.toggle("active", state.mode===k);
+  const tips = {
+    field:"Drag the 4 corners to match your out-of-bounds edges.",
+    goalA:"Drag the two endpoints of Goal A across the goal mouth (post to post).",
+    goalB:"Drag the two endpoints of Goal B across the goal mouth (post to post).",
+    cal:"Tap the ball on screen to lock onto its color.",
+  };
+  say(state.mode ? tips[state.mode] : (state.playing?"Match live!":"Ready. ✚ New Game or ▶ Kickoff."));
+}
+for(const k in modeBtns) modeBtns[k].addEventListener("click", ()=>setMode(k));
+
+$("setBtn").addEventListener("click", ()=> $("settings").classList.toggle("open"));
+
+// ---------- Settings wiring ----------
+$("sens").addEventListener("input", e=>{ state.sens=+e.target.value; $("sensVal").textContent=e.target.value; });
+$("minPix").addEventListener("input", e=>{ state.minPix=+e.target.value; $("minPixVal").textContent=e.target.value; });
+$("depth").addEventListener("input", e=>{ state.goalDepth=(+e.target.value)/100; $("depthVal").textContent=e.target.value; });
+$("debugChk").addEventListener("change", e=> state.debug=e.target.checked);
+$("goalAFor").addEventListener("change", e=> state.goalFor.A=+e.target.value);
+$("goalBFor").addEventListener("change", e=> state.goalFor.B=+e.target.value);
+
+function say(t){ banner.textContent=t; banner.style.opacity=1; clearTimeout(say._t); say._t=setTimeout(()=>banner.style.opacity=.25, 4000); }
+
+// ---------- Persistence (safe no-op where storage is unavailable) ----------
+function saveSetup(){
+  try{
+    localStorage.setItem("zgs", JSON.stringify({
+      field:state.field, goals:state.goals, goalDepth:state.goalDepth,
+      goalFor:state.goalFor, sens:state.sens, names:names(),
+      matchMode:state.match.mode, halfLen:state.match.halfLen,
+    }));
+  }catch(e){}
+}
+function loadSetup(){
+  try{
+    const s = JSON.parse(localStorage.getItem("zgs"));
+    if(!s) return;
+    if(s.field) state.field=s.field;
+    if(s.goals) state.goals=s.goals;
+    if(s.goalDepth){ state.goalDepth=s.goalDepth; $("depth").value=Math.round(s.goalDepth*100); $("depthVal").textContent=$("depth").value; }
+    if(s.goalFor){ state.goalFor=s.goalFor; $("goalAFor").value=s.goalFor.A; $("goalBFor").value=s.goalFor.B; }
+    if(s.sens){ state.sens=s.sens; $("sens").value=s.sens; $("sensVal").textContent=s.sens; }
+    if(s.names){ $("name1").value=s.names[0]; $("name2").value=s.names[1]; }
+    if(s.matchMode) state.match.mode=s.matchMode;
+    if(s.halfLen) state.match.halfLen=s.halfLen;
+  }catch(e){}
+}
+setInterval(saveSetup, 3000);
+loadSetup();
+
+// ---------- Main loop ----------
+let lastProc = 0;
+function loop(now){
+  requestAnimationFrame(loop);
+  if(!state.running) return;
+  if(video.videoWidth && proc.width!==PW) { PH = Math.round(PW*video.videoHeight/video.videoWidth); proc.width=PW; proc.height=PH; }
+  if(now - lastProc > 28){           // ~35 fps processing
+    lastProc = now;
+    if(state.ballColor && (state.playing || state.mode==null || state.debug)) trackBall(now);
+    if(state.playing) gameStep(now);
+  }
+  // match clock + half transitions
+  const m = state.match;
+  if(m.phase!=="idle"){
+    const e = clockElapsed(now);
+    if(m.mode==="timed" && (m.phase==="h1"||m.phase==="h2") && !m.paused && e>=m.halfLen){
+      if(m.phase==="h1") halftime(); else fullTime();
+    }
+    $("matchTime").textContent = m.mode==="timed"
+      ? fmtClock((m.phase==="h1"||m.phase==="h2") ? m.halfLen - e : 0)
+      : fmtClock(e);
+    const lbl = {h1:"1ST HALF", h2:"2ND HALF", ht:"HALFTIME", ft:"FULL TIME"}[m.phase];
+    const paused = m.paused && (m.phase==="h1"||m.phase==="h2");
+    $("phaseLabel").textContent = paused ? "PAUSED" : lbl;
+    $("phaseLabel").classList.toggle("paused", paused);
+  }else{
+    $("matchTime").textContent = "--:--";
+    $("phaseLabel").innerHTML = "&nbsp;";
+    $("phaseLabel").classList.remove("paused");
+  }
+  drawShapes();
+}
+requestAnimationFrame(loop);
+
+// ---------- Start ----------
+$("startCam").addEventListener("click", async ()=>{
+  try{
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      say("This browser blocks the camera here. Open this page over https (this hosted link) in Safari or Chrome.");
+      return;
+    }
+    await startCamera();
+    $("startCard").style.display="none";
+    say("Camera on. Set your field bounds (▢), goals (🥅), then calibrate the ball (🎯).");
+    setMode("field");
+  }catch(err){
+    say("Camera error: "+err.message+" — check permissions.");
+  }
+});
+// preload voices (some browsers load them async)
+if("speechSynthesis" in window) speechSynthesis.getVoices();
+</script>
+</body>
+</html>
