@@ -353,6 +353,7 @@ window.__test = { sideOfLine, pointInQuad, segLineCross, projT, goalZone, state,
 let fit = {scale:1, ox:0, oy:0, vw:1280, vh:720};
 function refit(){
   const r = overlay.parentElement.getBoundingClientRect();
+  refit._w = r.width; refit._h = r.height;
   const dpr = window.devicePixelRatio || 1;
   overlay.width = r.width*dpr; overlay.height = r.height*dpr;
   overlay.style.width = r.width+"px"; overlay.style.height = r.height+"px";
@@ -366,6 +367,18 @@ function refit(){
 const n2c = p => ({x:fit.ox + p.x*fit.vw*fit.scale, y:fit.oy + p.y*fit.vh*fit.scale});
 const c2n = (x,y) => ({x:(x-fit.ox)/(fit.vw*fit.scale), y:(y-fit.oy)/(fit.vh*fit.scale)});
 window.addEventListener("resize", refit);
+window.addEventListener("orientationchange", ()=>{ setTimeout(refit, 60); setTimeout(refit, 400); });
+video.addEventListener("loadedmetadata", refit);
+video.addEventListener("resize", refit);   // camera stream dimension changes (e.g. phone rotation)
+// safety net: if the stage size or video dimensions drift from what fit was computed with, remap
+function fitCheck(){
+  const st = overlay.parentElement;
+  const r = st.getBoundingClientRect();
+  if(Math.abs(r.width-(refit._w||0))>1 || Math.abs(r.height-(refit._h||0))>1 ||
+     (video.videoWidth && video.videoWidth!==fit.vw) || (video.videoHeight && video.videoHeight!==fit.vh)){
+    refit();
+  }
+}
 
 // ---------- Camera ----------
 async function startCamera(deviceId){
@@ -997,7 +1010,9 @@ let lastProc = 0;
 function loop(now){
   requestAnimationFrame(loop);
   if(!state.running) return;
-  if(video.videoWidth && proc.width!==PW) { PH = Math.round(PW*video.videoHeight/video.videoWidth); proc.width=PW; proc.height=PH; }
+  fitCheck();   // keep screen<->video mapping in sync (rotation, resize, camera changes)
+  const wantPH = video.videoWidth ? Math.round(PW*video.videoHeight/video.videoWidth) : PH;
+  if(wantPH && wantPH!==proc.height){ PH = wantPH; proc.width=PW; proc.height=PH; }
   if(now - lastProc > 28){           // ~35 fps processing
     lastProc = now;
     if(state.ballColor && (state.playing || state.mode==null || state.debug)) trackBall(now);
