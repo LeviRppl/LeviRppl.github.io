@@ -226,6 +226,8 @@
     <h3>Sound</h3>
     <div class="row"><label>Ambient crowd</label><label class="switch"><input type="checkbox" id="ambChk" checked><span class="slider"></span></label></div>
     <div class="row"><label>Crowd volume</label><input type="range" id="vol" min="0" max="100" value="60"><span class="val" id="volVal">60</span></div>
+    <div class="row"><label>Test crowd sound</label><button id="testSnd" class="tbtn" style="padding:6px 12px;">🔊 Play</button></div>
+    <p class="hint">iPhone: the ring/silent switch mutes web-app sound — flip it to ring. Volume buttons up, too.</p>
     <div class="row"><label>Announcer voice</label><label class="switch"><input type="checkbox" id="voiceChk" checked><span class="slider"></span></label></div>
     <div class="row"><label>Call out-of-bounds</label><label class="switch"><input type="checkbox" id="oobVoiceChk"><span class="slider"></span></label></div>
     <h3>Goals</h3>
@@ -414,13 +416,24 @@ $("camSel").addEventListener("change", e=> startCamera(e.target.value).catch(err
 // ---------- Audio ----------
 let AC=null, ambGain=null, master=null, ambTimer=null;
 function ensureAudio(){
-  if(AC) return;
+  if(AC){ if(AC.state==="suspended") AC.resume(); return; }
   const Ctx = window.AudioContext||window.webkitAudioContext;
   if(!Ctx) return;
   AC = new Ctx();
+  // iOS: the context often starts suspended even inside a tap — wake it explicitly
+  if(AC.state==="suspended") AC.resume();
+  // iOS unlock: play a one-sample silent buffer inside the user gesture
+  try{
+    const b = AC.createBuffer(1,1,22050);
+    const s = AC.createBufferSource(); s.buffer=b; s.connect(AC.destination); s.start(0);
+  }catch(e){}
   master = AC.createGain(); master.gain.value = getVol(); master.connect(AC.destination);
   startAmbient();
 }
+// iOS suspends audio when the app backgrounds or the screen locks — re-wake on any tap / return
+["pointerdown","touchend","click"].forEach(ev=>
+  document.addEventListener(ev, ()=>{ if(AC && AC.state==="suspended") AC.resume(); }, {passive:true}));
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && AC && AC.state==="suspended") AC.resume(); });
 function getVol(){ return (+$("vol").value)/100; }
 function noiseBuffer(sec){
   const b = AC.createBuffer(1, AC.sampleRate*sec, AC.sampleRate);
@@ -973,6 +986,15 @@ $("depth").addEventListener("input", e=>{
   for(const k of ["A","B"]){ const g=state.goals[k]; g.custom=false; extrudeZone(g); }
 });
 $("debugChk").addEventListener("change", e=> state.debug=e.target.checked);
+$("testSnd").addEventListener("click", ()=>{
+  ensureAudio();
+  setTimeout(()=>{
+    if(!AC){ say("This browser doesn't support web audio."); return; }
+    if(AC.state!=="running"){ say("Sound is blocked (state: "+AC.state+") — tap the screen once, check the silent switch, and try again."); return; }
+    crowdRoar(true); applause(4);
+    say("🔊 Playing crowd + applause. If it's silent, flip your iPhone's ring/silent switch and raise the volume.");
+  }, 150);
+});
 $("goalAFor").addEventListener("change", e=> state.goalFor.A=+e.target.value);
 $("goalBFor").addEventListener("change", e=> state.goalFor.B=+e.target.value);
 
