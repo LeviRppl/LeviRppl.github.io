@@ -234,6 +234,7 @@
     <div class="row"><label>Goal B scores for</label>
       <select id="goalBFor" ><option value="0">Player 1</option><option value="1" selected>Player 2</option></select></div>
     <div class="row"><label>Goal zone depth</label><input type="range" id="depth" min="2" max="20" value="7"><span class="val" id="depthVal">7</span></div>
+    <p class="hint">In goal edit mode: green dots are the posts, amber dots are the back corners of the net zone — drag them to fit your camera's perspective. The depth slider resets both zones to a simple shape.</p>
     <h3>Camera</h3>
     <div class="row"><label>Source</label><select id="camSel"></select></div>
   </div>
@@ -281,7 +282,7 @@ const state = {
   // normalized (0..1 of the video frame) geometry
   field:[{x:.12,y:.15},{x:.88,y:.15},{x:.88,y:.85},{x:.12,y:.85}],
   goals:{
-    A:{a:{x:.12,y:.38},b:{x:.12,y:.62}},   // left goal mouth
+    A:{a:{x:.12,y:.38},b:{x:.12,y:.62}},   // left goal mouth (back corners c,d generated)
     B:{a:{x:.88,y:.38},b:{x:.88,y:.62}},   // right goal mouth
   },
   goalDepth:0.07,
@@ -325,8 +326,8 @@ function segLineCross(a,b,p0,p1){
   const ip = {x:p0.x+(p1.x-p0.x)*f, y:p0.y+(p1.y-p0.y)*f};
   return projT(a,b,ip);
 }
-// zone quad behind the goal line (away from field center)
-function goalZone(g){
+// default back corners: extrude the mouth away from the field center by goalDepth
+function extrudeZone(g){
   const fc = centroid(state.field);
   let nx = -(g.b.y-g.a.y), ny = (g.b.x-g.a.x);
   const len = Math.hypot(nx,ny)||1; nx/=len; ny/=len;
@@ -334,10 +335,14 @@ function goalZone(g){
   // flip normal so it points AWAY from field center (behind the goal)
   if((fc.x-mid.x)*nx + (fc.y-mid.y)*ny > 0){ nx=-nx; ny=-ny; }
   const d = state.goalDepth;
-  return {
-    quad:[g.a, g.b, {x:g.b.x+nx*d, y:g.b.y+ny*d}, {x:g.a.x+nx*d, y:g.a.y+ny*d}],
-    fieldSide: sideOfLine(g.a,g.b,fc)
-  };
+  g.c = {x:g.b.x+nx*d, y:g.b.y+ny*d};   // back corner behind post b
+  g.d = {x:g.a.x+nx*d, y:g.a.y+ny*d};   // back corner behind post a
+}
+// goal zone quad: mouth a->b (the posts) + fully custom back corners c,d
+function goalZone(g){
+  if(!g.c || !g.d) extrudeZone(g);
+  const fc = centroid(state.field);
+  return { quad:[g.a, g.b, g.c, g.d], fieldSide: sideOfLine(g.a,g.b,fc) };
 }
 window.__test = { sideOfLine, pointInQuad, segLineCross, projT, goalZone, state,
   gameStep: (...a)=>gameStep(...a),
@@ -800,6 +805,15 @@ function drawShapes(){
     octx.beginPath();
     quad.forEach((p,i)=>{ const c=n2c(p); i?octx.lineTo(c.x,c.y):octx.moveTo(c.x,c.y); });
     octx.closePath(); octx.fill();
+    // dashed zone outline while editing this goal
+    if(state.mode==="goal"+k){
+      octx.strokeStyle = `rgba(${col},.7)`;
+      octx.lineWidth = 1.5; octx.setLineDash([6,5]);
+      octx.beginPath();
+      quad.forEach((p,i)=>{ const c=n2c(p); i?octx.lineTo(c.x,c.y):octx.moveTo(c.x,c.y); });
+      octx.closePath(); octx.stroke();
+      octx.setLineDash([]);
+    }
     octx.strokeStyle = `rgba(${col},.9)`;
     octx.lineWidth = state.mode==="goal"+k ? 4 : 2.5;
     const ca=n2c(g.a), cb=n2c(g.b);
@@ -811,14 +825,15 @@ function drawShapes(){
     octx.fillText(k, m.x, m.y-8);
   }
 
-  // handles in edit modes
+  // handles in edit modes (green = field corners / goal posts, amber = zone back corners)
   const handles = editHandles();
   for(const hd of handles){
     const c = n2c(hd.p);
+    const col = hd.back ? "251,191,36" : "74,222,128";
     octx.beginPath(); octx.arc(c.x,c.y,11,0,7);
-    octx.fillStyle="rgba(74,222,128,.25)"; octx.fill();
+    octx.fillStyle=`rgba(${col},.25)`; octx.fill();
     octx.beginPath(); octx.arc(c.x,c.y,5,0,7);
-    octx.fillStyle="#4ade80"; octx.fill();
+    octx.fillStyle=`rgb(${col})`; octx.fill();
   }
 
   // debug mask
@@ -847,7 +862,13 @@ function editHandles(){
   if(state.mode==="field") return state.field.map((p,i)=>({p, set:(q)=>state.field[i]=q}));
   if(state.mode==="goalA"||state.mode==="goalB"){
     const g = state.goals[state.mode==="goalA"?"A":"B"];
-    return [{p:g.a,set:q=>g.a=q},{p:g.b,set:q=>g.b=q}];
+    goalZone(g);  // ensure back corners exist
+    return [
+      {p:g.a, set:q=>{g.a=q; if(!g.custom) extrudeZone(g);}},          // posts (green)
+      {p:g.b, set:q=>{g.b=q; if(!g.custom) extrudeZone(g);}},
+      {p:g.c, set:q=>{g.c=q; g.custom=true;}, back:true},              // back corners (amber)
+      {p:g.d, set:q=>{g.d=q; g.custom=true;}, back:true},
+    ];
   }
   return [];
 }
@@ -891,8 +912,8 @@ function setMode(m){
   for(const k in modeBtns) modeBtns[k].classList.toggle("active", state.mode===k);
   const tips = {
     field:"Drag the 4 corners to match your out-of-bounds edges.",
-    goalA:"Drag the two endpoints of Goal A across the goal mouth (post to post).",
-    goalB:"Drag the two endpoints of Goal B across the goal mouth (post to post).",
+    goalA:"Goal A: green dots = posts (goal mouth). Amber dots = back of the net — drag to match your camera angle.",
+    goalB:"Goal B: green dots = posts (goal mouth). Amber dots = back of the net — drag to match your camera angle.",
     cal:"Tap the ball on screen to lock onto its color.",
   };
   say(state.mode ? tips[state.mode] : (state.playing?"Match live!":"Ready. ✚ New Game or ▶ Kickoff."));
@@ -904,7 +925,11 @@ $("setBtn").addEventListener("click", ()=> $("settings").classList.toggle("open"
 // ---------- Settings wiring ----------
 $("sens").addEventListener("input", e=>{ state.sens=+e.target.value; $("sensVal").textContent=e.target.value; });
 $("minPix").addEventListener("input", e=>{ state.minPix=+e.target.value; $("minPixVal").textContent=e.target.value; });
-$("depth").addEventListener("input", e=>{ state.goalDepth=(+e.target.value)/100; $("depthVal").textContent=e.target.value; });
+$("depth").addEventListener("input", e=>{
+  state.goalDepth=(+e.target.value)/100; $("depthVal").textContent=e.target.value;
+  // regenerate both zones from the slider (clears any custom-dragged back corners)
+  for(const k of ["A","B"]){ const g=state.goals[k]; g.custom=false; extrudeZone(g); }
+});
 $("debugChk").addEventListener("change", e=> state.debug=e.target.checked);
 $("goalAFor").addEventListener("change", e=> state.goalFor.A=+e.target.value);
 $("goalBFor").addEventListener("change", e=> state.goalFor.B=+e.target.value);
