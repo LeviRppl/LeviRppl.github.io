@@ -475,6 +475,33 @@ function crowdRoar(big){
   tg.gain.exponentialRampToValueAtTime(0.001, AC.currentTime+0.7);
   th.connect(tg).connect(master); th.start(); th.stop(AC.currentTime+0.8);
 }
+function applause(dur){
+  if(!AC) return;
+  dur = dur || 5;
+  const sr = AC.sampleRate, len = Math.floor(sr*dur);
+  const buf = AC.createBuffer(1, len, sr);
+  const d = buf.getChannelData(0);
+  // scatter individual claps — dense right after the goal, thinning toward the end
+  const claps = Math.floor(dur*260);
+  for(let k=0;k<claps;k++){
+    const start = Math.floor(Math.pow(Math.random(),1.35)*len*0.96);
+    const clapLen = Math.floor(sr*(0.004+Math.random()*0.004));
+    const amp = 0.25+Math.random()*0.5;
+    for(let i=0;i<clapLen && start+i<len;i++){
+      d[start+i] += (Math.random()*2-1)*amp*Math.exp(-i/(clapLen*0.35));
+    }
+  }
+  // overall envelope: fast swell, sustain, fade out over the last second
+  for(let i=0;i<len;i++){
+    const t=i/len;
+    d[i] *= Math.min(1, t*12) * (t>0.8 ? (1-t)/0.2 : 1);
+  }
+  const src = AC.createBufferSource(); src.buffer = buf;
+  const bp = AC.createBiquadFilter(); bp.type="bandpass"; bp.frequency.value=1600; bp.Q.value=0.4;
+  const g = AC.createGain(); g.gain.value = 0.55;
+  src.connect(bp).connect(g).connect(master);
+  src.start();
+}
 function refWhistle(){
   if(!AC) return;
   const mk = (t0)=>{
@@ -607,8 +634,9 @@ function onGoal(which){
   const gf = $("goalFlash");
   gf.classList.remove("show"); void gf.offsetWidth; gf.classList.add("show");
   setTimeout(()=>gf.classList.remove("show"), 3600);
-  // audio
+  // audio: roar + ~5s of applause
   crowdRoar(true);
+  applause(5);
   setTimeout(()=> announce(`Goal! ${scorer} scores. ${scoreText()}`), 1300);
   // disarm both goals until ball returns to the field
   for(const k of ["A","B"]){
@@ -723,6 +751,7 @@ function fullTime(){
   syncPlaying();
   refWhistle(); setTimeout(refWhistle, 500);
   crowdRoar(true);
+  applause(6);
   const [n1,n2]=names(), [s1,s2]=state.scores;
   const call = s1===s2 ? `Full time! It ends in a draw, ${s1} all.`
     : `Full time! ${s1>s2?n1:n2} wins it, ${Math.max(s1,s2)} to ${Math.min(s1,s2)}!`;
